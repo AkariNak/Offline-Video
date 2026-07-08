@@ -21,6 +21,7 @@ const LS_KEY='reel_library_v2';
 function loadLibrary(){try{return JSON.parse(localStorage.getItem(LS_KEY))||[];}catch{return[];}}
 function saveLibrary(){try{localStorage.setItem(LS_KEY,JSON.stringify(library));}catch(e){toast('Could not save. Storage may be full.',true);}}
 let library=loadLibrary();
+migrate();
 
 /* ============ helpers ============ */
 const $=s=>document.querySelector(s);
@@ -81,3 +82,66 @@ async function searchOnline(title){
   return out;
 }
 function urlToDataURL(url){return new Promise((res,rej)=>{const img=new Image();img.crossOrigin='anonymous';img.onload=()=>{try{const maxW=460,scale=Math.min(1,maxW/img.naturalWidth),c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*scale);c.height=Math.round(img.naturalHeight*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',0.85));}catch(e){rej(e);}};img.onerror=()=>rej(new Error('load'));img.src=url;});}
+
+/* ============ series / shows ============ */
+function parseEpisode(raw){
+  let n=raw.replace(/\.[^.]+$/,'').replace(/[._]+/g,' ');
+  let m;
+  if(m=n.match(/\bs(\d{1,2})\s*[\- ]?\s*e(\d{1,3})\b/i)) return {season:+m[1],episode:+m[2]};
+  if(m=n.match(/\bseason\s*(\d{1,2})\b[^\d]*?\b(?:episode|ep)\s*(\d{1,3})\b/i)) return {season:+m[1],episode:+m[2]};
+  if(m=n.match(/\b(?:episode|ep)\s*(\d{1,3})\b/i)) return {season:1,episode:+m[1]};
+  if(m=n.match(/\s[-–—]\s*(\d{1,3})\s*$/)) return {season:1,episode:+m[1]};
+  return {season:1,episode:null};
+}
+function normShow(s){return (s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();}
+function isCompleted(v){const d=v.duration||0;if(d<=0)return false;return (v.progress||0)>=d-600||(v.progress||0)>=d*0.9;}
+
+function groupShows(items){
+  const map=new Map();
+  items.forEach(v=>{
+    const key=normShow(v.show||v.title);
+    if(!map.has(key)) map.set(key,{key,name:v.show||v.title,episodes:[]});
+    map.get(key).episodes.push(v);
+  });
+  const shows=[...map.values()];
+  shows.forEach(s=>{
+    s.episodes.sort((a,b)=>
+      ((a.season||1)-(b.season||1)) ||
+      (((a.episode==null?1e9:a.episode))-((b.episode==null?1e9:b.episode))) ||
+      ((a.addedAt||0)-(b.addedAt||0)));
+    const cov=s.episodes.find(e=>e.cover)||s.episodes[0];
+    s.cover=cov.cover; s.coverType=cov.coverType;
+    const stl=s.episodes.find(e=>e.still)||s.episodes[0];
+    s.still=stl.still;
+    const gen=s.episodes.find(e=>e.genres&&e.genres.length);
+    s.genres=gen?gen.genres:[];
+    const syn=s.episodes.find(e=>e.synopsis);
+    s.synopsis=syn?syn.synopsis:'';
+    s.type=(s.episodes.find(e=>e.type)||{}).type||'Show';
+    s.year=(s.episodes.find(e=>e.year)||{}).year||null;
+    s.score=(s.episodes.find(e=>e.score)||{}).score||null;
+    s.size=s.episodes.reduce((x,e)=>x+(e.size||0),0);
+    s.addedAt=Math.max.apply(null,s.episodes.map(e=>e.addedAt||0));
+    s.count=s.episodes.length;
+    s.multiSeason=new Set(s.episodes.map(e=>e.season||1)).size>1;
+    const inProg=s.episodes.filter(e=>(e.progress||0)>20 && !isCompleted(e));
+    inProg.sort((a,b)=>(b.lastWatched||0)-(a.lastWatched||0));
+    s.resume=inProg[0]||null;
+  });
+  return shows;
+}
+function existingShowMeta(name){
+  const key=normShow(name);
+  if(!library.some(v=>normShow(v.show||v.title)===key)) return null;
+  return groupShows(library).find(s=>s.key===key)||null;
+}
+function migrate(){
+  let changed=false;
+  (library||[]).forEach(v=>{
+    if(v.show===undefined){v.show=v.title; changed=true;}
+    if(v.season===undefined){v.season=1; changed=true;}
+    if(v.episode===undefined){v.episode=null; changed=true;}
+    if(v.lastWatched===undefined){v.lastWatched=0; changed=true;}
+  });
+  if(changed) saveLibrary();
+}
