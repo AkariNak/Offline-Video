@@ -35,8 +35,8 @@
     backdrop-filter:blur(4px);
   }
   .mark{display:flex;align-items:center;gap:11px}
-  .glyph{width:34px;height:34px;border-radius:8px;background:var(--accent);display:grid;place-items:center;flex:none}
-  .glyph svg{width:18px;height:18px;fill:#fff}
+  .glyph{width:34px;height:34px;border-radius:8px;overflow:hidden;display:grid;place-items:center;flex:none}
+  .glyph svg{width:34px;height:34px;display:block}
   .brand{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:-.02em}
   nav{display:flex;gap:4px;margin-left:8px}
   nav button{
