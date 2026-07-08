@@ -82,7 +82,7 @@
     </div>
     <div class="modal-body">
       <div class="field">
-        <label for="mName">Title</label>
+        <label for="mName">Show title</label>
         <div class="row">
           <input id="mName" type="text" placeholder="e.g. Call of the Night" autocomplete="off" />
           <select id="mType" aria-label="Type">
@@ -91,6 +91,11 @@
             <option value="OVA">OVA</option>
           </select>
           <button class="btn" id="mFind"><svg viewBox="0 0 24 24"><path d="M10 2a8 8 0 1 0 4.9 14.3l5.4 5.4 1.4-1.4-5.4-5.4A8 8 0 0 0 10 2Zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12Z"/></svg> Find covers</button>
+        </div>
+        <div class="subrow">
+          <label class="mini">Season <input id="mSeason" type="number" min="1" value="1" /></label>
+          <label class="mini">Episode <input id="mEpisode" type="number" min="1" placeholder="—" /></label>
+          <span class="subhint">Videos with the same show title group into one show. Leave episode blank for a standalone title or movie.</span>
         </div>
       </div>
       <div class="cover-section">
@@ -112,14 +117,24 @@
 
 <!-- PLAYER -->
 <div class="player" id="player">
-  <div class="player-top">
-    <h2 id="pTitle"></h2>
-    <div class="actions">
-      <button class="btn danger ghost" id="pDelete"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1L7 9Z"/></svg> Delete</button>
-      <button class="btn" id="pClose">Close</button>
+  <div class="player-stage">
+    <div class="player-top">
+      <h2 id="pTitle"></h2>
+      <div class="actions">
+        <button class="btn" id="pEpisodes" style="display:none"><svg viewBox="0 0 24 24"><path d="M3 5h18v2H3V5Zm0 6h18v2H3v-2Zm0 6h12v2H3v-2Z"/></svg> Episodes</button>
+        <button class="btn danger ghost" id="pDelete"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1L7 9Z"/></svg> Delete</button>
+        <button class="btn" id="pClose">Close</button>
+      </div>
     </div>
+    <video id="pVideo" controls playsinline></video>
   </div>
-  <video id="pVideo" controls playsinline></video>
+  <aside class="ep-panel" id="epPanel">
+    <div class="ep-head">
+      <span>Episodes</span>
+      <button class="icon-btn" id="epClose" aria-label="Hide episodes"><svg viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4 6.4 5Z"/></svg></button>
+    </div>
+    <div class="ep-scroll" id="epScroll"></div>
+  </aside>
 </div>
 
 <div class="toast" id="toast"></div>
