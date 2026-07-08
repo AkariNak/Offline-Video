@@ -12,17 +12,21 @@ $('#fileInput').addEventListener('change',e=>{
 async function nextInQueue(){
   if(!queue.length){closeModal();return;}
   const file=queue.shift();
-  current={id:uid(),file,title:cleanTitle(file.name),duration:0,still:null};
+  const ep=parseEpisode(file.name);
+  current={id:uid(),file,title:cleanTitle(file.name),season:ep.season,episode:ep.episode,duration:0,still:null};
   selectedCover=null; selectedMeta=null;
   await openModalFor(current,queue.length);
 }
 async function openModalFor(item,remaining){
   $('#mName').value=item.title;
   $('#mType').value='Show';
+  $('#mSeason').value=item.season||1;
+  $('#mEpisode').value=item.episode!=null?item.episode:'';
   $('#mQueue').textContent=remaining>0?(remaining+' more queued'):'';
   $('#mSearchState').innerHTML='';
   const covers=$('#mCovers'); covers.innerHTML=''; addUploadTile(covers);
   overlay.classList.add('open'); $('#mName').focus();
+
   const {frames,duration}=await captureFrames(item.file,6);
   item.duration=duration;
   if(frames.length){
@@ -37,7 +41,21 @@ async function openModalFor(item,remaining){
     n.textContent='Could not read frames from this file (the browser may not decode this format). Try Find covers or upload your own.';
     $('#mSearchState').appendChild(n);
   }
-  runOnlineSearch(item.title,true);
+
+  // If this show already exists, reuse its cover and metadata so episodes match
+  const ex=existingShowMeta(item.title);
+  if(ex && ex.cover){
+    const meta={type:ex.type,genres:ex.genres,synopsis:ex.synopsis,year:ex.year,score:ex.score};
+    const tile=coverTile(ex.cover, ex.coverType==='url'?'url':'data', ex.cover, meta);
+    covers.insertBefore(tile,covers.firstChild);
+    selectCover(tile,{kind:ex.coverType==='url'?'url':'data',value:ex.cover},meta);
+    $('#mType').value=ex.type||'Show';
+    const note=document.createElement('p'); note.className='hint';
+    note.textContent='Reusing the cover and genres from “'+ex.name+'” already in your library.';
+    $('#mSearchState').appendChild(note);
+  }else{
+    runOnlineSearch(item.title,true);
+  }
 }
 function addUploadTile(c){
   const t=document.createElement('div'); t.className='cover-opt upload';
@@ -62,7 +80,6 @@ function selectCover(tile,cover,meta){
   tile.classList.add('sel'); selectedCover=cover; selectedMeta=meta;
   if(meta&&meta.type) $('#mType').value=meta.type;
 }
-let searchDebounce;
 $('#mName').addEventListener('input',e=>{if(current)current.title=e.target.value;});
 $('#mFind').addEventListener('click',()=>runOnlineSearch($('#mName').value,false));
 async function runOnlineSearch(title,quiet){
@@ -82,25 +99,36 @@ async function runOnlineSearch(title,quiet){
 $('#mSave').addEventListener('click',saveCurrent);
 async function saveCurrent(){
   if(!current)return;
-  const title=($('#mName').value||'Untitled').trim();
+  const show=($('#mName').value||'Untitled').trim();
+  let season=parseInt($('#mSeason').value,10); if(!season||season<1)season=1;
+  const epRaw=($('#mEpisode').value||'').trim();
+  let episode = epRaw===''?null:parseInt(epRaw,10); if(episode!=null&&(isNaN(episode)||episode<1))episode=null;
+
   let coverType='none',cover='';
   if(selectedCover){
     if(selectedCover.kind==='data'){coverType='data';cover=selectedCover.value;}
     else{try{cover=await urlToDataURL(selectedCover.value);coverType='data';}catch(e){cover=selectedCover.value;coverType='url';}}
   }
+  let m=selectedMeta||{};
+  if(!m.genres||!m.genres.length){
+    const ex=existingShowMeta(show);
+    if(ex){ m={type:ex.type,genres:ex.genres,synopsis:ex.synopsis,year:ex.year,score:ex.score}; if(!$('#mType').value)$('#mType').value=ex.type; }
+  }
+
   $('#mSave').disabled=true;
   try{await idbPut(current.id,current.file);}
   catch(e){$('#mSave').disabled=false;toast('Could not save the video file. It may be too large for this device.',true);return;}
-  const m=selectedMeta||{};
   library.unshift({
-    id:current.id, title, type:$('#mType').value||'Show',
+    id:current.id, title:show, show, season, episode,
+    type:$('#mType').value||m.type||'Show',
     coverType, cover, still:current.still||null,
     genres:m.genres||[], synopsis:m.synopsis||'', year:m.year||null, score:m.score||null,
     duration:current.duration||0, size:current.file.size, mime:current.file.type,
-    addedAt:Date.now(), progress:0
+    addedAt:Date.now(), progress:0, lastWatched:0
   });
   saveLibrary(); rebuild();
-  $('#mSave').disabled=false; toast('Added “'+title+'”');
+  const lbl = episode!=null?(' '+(season>1?('S'+season+' '):'')+'E'+episode):'';
+  $('#mSave').disabled=false; toast('Added “'+show+lbl+'”');
   current=null; nextInQueue();
 }
 $('#mSkip').addEventListener('click',()=>{current=null;nextInQueue();});
@@ -111,9 +139,11 @@ function closeModal(){overlay.classList.remove('open');}
 /* ============ view state ============ */
 let filterType='All', filterGenre=null, view='home'; // home | grid | stats
 let heroItems=[], heroIndex=0, heroTimer=null;
+let SHOWS=[];
 
 function rebuild(){
   const has=library.length>0;
+  SHOWS=groupShows(library);
   $('#empty').style.display = (has || view==='stats') ? 'none' : 'block';
   $('#hero').style.display = (has && view!=='stats') ? 'block' : 'none';
   $('#filters').style.display = (has && view!=='stats') ? 'block' : 'none';
@@ -128,11 +158,15 @@ function rebuild(){
   else { $('#gridView').style.display='none'; renderRows(); }
 }
 
+function matchesType(s){return filterType==='All'||s.type===filterType;}
+function searchTerm(){return ($('#filter').value||'').toLowerCase();}
+function baseShows(){const t=searchTerm();return SHOWS.filter(s=>matchesType(s)&&(!t||s.name.toLowerCase().includes(t)));}
+function epLabelFor(show,ep){ if(!ep||ep.episode==null)return ''; return (show.multiSeason?('S'+ep.season+' '):'')+'E'+ep.episode; }
+
 /* ---- hero ---- */
 function renderHero(){
-  const term=($('#filter').value||'').toLowerCase();
-  const pool=library.filter(v=>matchesType(v)&&(!term||v.title.toLowerCase().includes(term)));
-  heroItems=pool.filter(v=>v.cover||v.still).slice(0,6);
+  const pool=baseShows();
+  heroItems=pool.filter(s=>s.cover||s.still).slice(0,6);
   if(!heroItems.length) heroItems=pool.slice(0,6);
   if(!heroItems.length){$('#hero').style.display='none';return;}
   if(heroIndex>=heroItems.length) heroIndex=0;
@@ -141,15 +175,16 @@ function renderHero(){
   if(heroItems.length>1) heroTimer=setInterval(()=>{heroIndex=(heroIndex+1)%heroItems.length;drawHero();},7000);
 }
 function drawHero(){
-  const v=heroItems[heroIndex]; if(!v)return;
-  const bg=v.cover||v.still||'';
-  const posterInner=(v.cover)?'<img alt="" src="'+v.cover+'">':(v.still?'<img alt="" src="'+v.still+'">':'<div class="ph">'+(v.title[0]||'?').toUpperCase()+'</div>');
-  const desc=v.synopsis?escapeHtml(v.synopsis):('Saved on this device · '+fmtSize(v.size)+(v.duration?' · '+fmtDur(v.duration):''));
+  const s=heroItems[heroIndex]; if(!s)return;
+  const bg=s.cover||s.still||'';
+  const posterInner=(s.cover)?'<img alt="" src="'+s.cover+'">':(s.still?'<img alt="" src="'+s.still+'">':'<div class="ph">'+(s.name[0]||'?').toUpperCase()+'</div>');
+  const desc=s.synopsis?escapeHtml(s.synopsis):(s.count>1?(s.count+' episodes saved on this device'):('Saved on this device · '+fmtSize(s.size)));
   const tags=[];
-  if(v.type)tags.push(v.type);
-  if(v.year)tags.push(v.year);
-  if(v.score)tags.push('★ '+v.score);
-  (v.genres||[]).slice(0,3).forEach(g=>tags.push(g));
+  if(s.type)tags.push(s.type);
+  if(s.count>1)tags.push(s.count+' episodes');
+  if(s.year)tags.push(s.year);
+  if(s.score)tags.push('★ '+s.score);
+  (s.genres||[]).slice(0,3).forEach(g=>tags.push(g));
   const dots=heroItems.map((_,i)=>'<i class="'+(i===heroIndex?'on':'')+'" data-i="'+i+'"></i>').join('');
   $('#hero').innerHTML=
     (bg?'<div class="hero-bg" style="background-image:url('+"'"+bg+"'"+')"></div>':'<div class="hero-bg" style="background:linear-gradient(135deg,#141824,#1a1f2e)"></div>')+
@@ -159,18 +194,18 @@ function drawHero(){
     '<div class="hero-inner">'+
       '<div class="hero-poster">'+posterInner+'</div>'+
       '<div class="hero-text">'+
-        '<div class="hero-eyebrow">'+escapeHtml(v.type||'Video')+'</div>'+
-        '<div class="hero-title">'+escapeHtml(v.title)+'</div>'+
+        '<div class="hero-eyebrow">'+escapeHtml(s.type||'Video')+'</div>'+
+        '<div class="hero-title">'+escapeHtml(s.name)+'</div>'+
         '<div class="hero-desc">'+desc+'</div>'+
         (tags.length?'<div class="hero-tags">'+tags.map(t=>'<span>'+escapeHtml(String(t))+'</span>').join('')+'</div>':'')+
         '<div class="hero-actions">'+
-          '<button class="btn primary" id="hPlay"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7L8 5Z"/></svg> Watch now</button>'+
+          '<button class="btn primary" id="hPlay"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7L8 5Z"/></svg> '+(s.resume?'Resume':'Watch now')+'</button>'+
           '<button class="btn danger ghost" id="hDelete"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1L7 9Z"/></svg> Delete</button>'+
         '</div>'+
       '</div>'+
     '</div>';
-  const play=$('#hPlay'); if(play)play.onclick=()=>openPlayer(v.id);
-  const del=$('#hDelete'); if(del)del.onclick=()=>deleteItem(v.id,v.title);
+  const play=$('#hPlay'); if(play)play.onclick=()=>openShow(s.key);
+  const del=$('#hDelete'); if(del)del.onclick=()=>deleteShow(s.key);
   const prev=$('#hPrev'); if(prev)prev.onclick=()=>{heroIndex=(heroIndex-1+heroItems.length)%heroItems.length;drawHero();resetHeroTimer();};
   const next=$('#hNext'); if(next)next.onclick=()=>{heroIndex=(heroIndex+1)%heroItems.length;drawHero();resetHeroTimer();};
   document.querySelectorAll('#hero .dots i').forEach(d=>d.onclick=()=>{heroIndex=+d.dataset.i;drawHero();resetHeroTimer();});
@@ -178,7 +213,6 @@ function drawHero(){
 function resetHeroTimer(){clearInterval(heroTimer);if(heroItems.length>1)heroTimer=setInterval(()=>{heroIndex=(heroIndex+1)%heroItems.length;drawHero();},7000);}
 
 /* ---- filters ---- */
-function matchesType(v){return filterType==='All'||v.type===filterType;}
 function renderFilters(){
   const types=['All','Show','Movie','OVA'];
   const labelMap={All:'All',Show:'Shows',Movie:'Movies',OVA:'OVA'};
@@ -186,7 +220,7 @@ function renderFilters(){
   document.querySelectorAll('#typeTabs button').forEach(b=>b.onclick=()=>{filterType=b.dataset.t;heroIndex=0;rebuild();});
 
   const gcount={};
-  library.filter(matchesType).forEach(v=>(v.genres||[]).forEach(g=>gcount[g]=(gcount[g]||0)+1));
+  SHOWS.filter(matchesType).forEach(s=>(s.genres||[]).forEach(g=>gcount[g]=(gcount[g]||0)+1));
   const genres=Object.keys(gcount).sort((a,b)=>gcount[b]-gcount[a]);
   let chips='<button class="'+(!filterGenre?'on':'')+'" data-g="__all">All</button>';
   chips+=genres.map(g=>'<button class="'+(filterGenre===g?'on':'')+'" data-g="'+escapeAttr(g)+'">'+escapeHtml(g)+'</button>').join('');
@@ -201,21 +235,19 @@ function renderFilters(){
 
 /* ---- rows (home) ---- */
 function renderRows(){
-  const term=($('#filter').value||'').toLowerCase();
-  const base=library.filter(v=>matchesType(v)&&(!term||v.title.toLowerCase().includes(term)));
+  const base=baseShows();
   const rows=$('#rows'); rows.innerHTML='';
 
-  const continuing=base.filter(v=>v.progress>20 && (!v.duration || v.progress < v.duration-20))
-    .sort((a,b)=>b.addedAt-a.addedAt);
+  const continuing=base.filter(s=>s.resume).sort((a,b)=>(b.resume.lastWatched||0)-(a.resume.lastWatched||0));
   if(continuing.length) rows.appendChild(buildRow('Continue watching',continuing,true,null));
 
   const recent=[...base].sort((a,b)=>b.addedAt-a.addedAt);
   if(recent.length) rows.appendChild(buildRow('Recently added',recent,false,'__recent'));
 
   const gcount={};
-  base.forEach(v=>(v.genres||[]).forEach(g=>gcount[g]=(gcount[g]||0)+1));
+  base.forEach(s=>(s.genres||[]).forEach(g=>gcount[g]=(gcount[g]||0)+1));
   Object.keys(gcount).sort((a,b)=>gcount[b]-gcount[a]).slice(0,8).forEach(g=>{
-    const items=base.filter(v=>(v.genres||[]).includes(g)).sort((a,b)=>b.addedAt-a.addedAt);
+    const items=base.filter(s=>(s.genres||[]).includes(g)).sort((a,b)=>b.addedAt-a.addedAt);
     if(items.length) rows.appendChild(buildRow(g,items,false,g));
   });
 
@@ -223,7 +255,7 @@ function renderRows(){
     rows.innerHTML='<p class="hint" style="padding:0 34px">No titles match your filters.</p>';
   }
 }
-function buildRow(title,items,landscape,viewAllKey){
+function buildRow(title,shows,landscape,viewAllKey){
   const sec=document.createElement('div'); sec.className='row';
   const head=document.createElement('div'); head.className='row-head';
   head.innerHTML='<h2>'+escapeHtml(title)+'</h2>';
@@ -235,7 +267,7 @@ function buildRow(title,items,landscape,viewAllKey){
   sec.appendChild(head);
   const wrap=document.createElement('div'); wrap.className='scroller-wrap';
   const sc=document.createElement('div'); sc.className='scroller';
-  items.forEach(v=>sc.appendChild(makeCard(v,landscape)));
+  shows.forEach(s=>sc.appendChild(makeCard(s,landscape)));
   const left=document.createElement('button'); left.className='row-arrow left'; left.disabled=true;
   left.innerHTML='<svg viewBox="0 0 24 24"><path d="M15 6 9 12l6 6 1.4-1.4L11.8 12l4.6-4.6L15 6Z"/></svg>';
   const right=document.createElement('button'); right.className='row-arrow right';
@@ -249,53 +281,63 @@ function buildRow(title,items,landscape,viewAllKey){
   setTimeout(upd,50);
   return sec;
 }
-function makeCard(v,landscape){
+function makeCard(s,landscape){
   const card=document.createElement('div');
   card.className='card '+(landscape?'land':'portrait');
-  const img=landscape?(v.still||v.cover):(v.cover||v.still);
-  const inner=img?'<img alt="'+escapeAttr(v.title)+'" loading="lazy" src="'+img+'">':'<div class="ph">'+(v.title[0]||'?').toUpperCase()+'</div>';
-  const pct=v.duration?Math.min(100,(v.progress/v.duration)*100):0;
-  const label=(v.genres&&v.genres[0])?v.genres[0]:v.type;
-  const sub=v.year?(v.type+' · '+v.year):(fmtSize(v.size)+(v.duration?' · '+fmtDur(v.duration):''));
+  const resume=s.resume||s.episodes[0];
+  const img=landscape?(resume.still||s.still||s.cover):(s.cover||s.still);
+  const inner=img?'<img alt="'+escapeAttr(s.name)+'" loading="lazy" src="'+img+'">':'<div class="ph">'+(s.name[0]||'?').toUpperCase()+'</div>';
+  const label=(s.genres&&s.genres[0])?s.genres[0]:s.type;
+  let pct=0, sub;
+  if(landscape){
+    pct=resume.duration?Math.min(100,((resume.progress||0)/resume.duration)*100):0;
+    const el=epLabelFor(s,resume);
+    sub=(el?el+' · ':'')+'Resume';
+  }else{
+    if(s.count>1){ sub=s.count+' episodes'; }
+    else{ const e=s.episodes[0]; sub=s.year?(s.type+' · '+s.year):(fmtSize(s.size)+(e.duration?' · '+fmtDur(e.duration):'')); pct=e.duration?Math.min(100,((e.progress||0)/e.duration)*100):0; }
+  }
+  const badge = s.count>1 ? (s.count+' EP') : (s.type||'Video');
+  const badgeClass = s.count>1 ? '' : typeClass(s.type);
   card.innerHTML=
     '<div class="thumb">'+inner+
-      '<span class="badge '+typeClass(v.type)+'">'+escapeHtml(v.type||'Video')+'</span>'+
+      '<span class="badge '+badgeClass+'">'+escapeHtml(badge)+'</span>'+
       '<div class="play-hint"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7L8 5Z"/></svg></div>'+
       (pct>1?'<div class="pbar"><i style="width:'+pct+'%"></i></div>':'')+
     '</div>'+
     '<div class="label">'+escapeHtml(label||'')+'</div>'+
-    '<h3>'+escapeHtml(v.title)+'</h3>'+
+    '<h3>'+escapeHtml(s.name)+'</h3>'+
     '<div class="sub">'+escapeHtml(sub)+'</div>';
-  card.onclick=()=>openPlayer(v.id);
+  card.onclick=()=> landscape ? openShow(s.key, resume.id) : openShow(s.key);
   return card;
 }
 
 /* ---- grid view ---- */
 function renderGrid(){
-  const term=($('#filter').value||'').toLowerCase();
-  let items=library.filter(v=>matchesType(v)&&(!term||v.title.toLowerCase().includes(term)));
-  if(filterGenre) items=items.filter(v=>(v.genres||[]).includes(filterGenre));
+  let items=baseShows();
+  if(filterGenre) items=items.filter(s=>(s.genres||[]).includes(filterGenre));
   items.sort((a,b)=>b.addedAt-a.addedAt);
   $('#gridTitle').textContent=filterGenre?filterGenre:'All titles';
   $('#gridCount').textContent=items.length+(items.length===1?' title':' titles');
   const g=$('#grid'); g.innerHTML='';
   if(!items.length){g.innerHTML='<p class="hint">Nothing here yet.</p>';return;}
-  items.forEach(v=>{const c=makeCard(v,false);c.style.width='auto';g.appendChild(c);});
+  items.forEach(s=>{const c=makeCard(s,false);c.style.width='auto';g.appendChild(c);});
 }
 $('#gridBack').addEventListener('click',()=>{filterGenre=null;view='home';rebuild();});
 
 /* ---- stats ---- */
 function renderStats(){
-  const n=library.length;
+  const shows=groupShows(library);
   const totalSize=library.reduce((s,v)=>s+(v.size||0),0);
   const totalWatch=library.reduce((s,v)=>s+(v.progress||0),0);
-  const inProgress=library.filter(v=>v.progress>20&&(!v.duration||v.progress<v.duration-20)).length;
+  const inProgress=shows.filter(s=>s.resume).length;
   const gcount={};
-  library.forEach(v=>(v.genres||[]).forEach(g=>gcount[g]=(gcount[g]||0)+1));
+  shows.forEach(s=>(s.genres||[]).forEach(g=>gcount[g]=(gcount[g]||0)+1));
   const top=Object.keys(gcount).sort((a,b)=>gcount[b]-gcount[a]).slice(0,8);
   const max=top.length?gcount[top[0]]:1;
   let html='<h2>Stats</h2><div class="stat-grid">'+
-    stat(n,'Titles')+
+    stat(shows.length,'Shows')+
+    stat(library.length,'Episodes')+
     stat(fmtSize(totalSize),'On device')+
     stat(fmtDur(totalWatch||0),'Watched')+
     stat(inProgress,'In progress')+
