@@ -93,16 +93,18 @@
           <button class="btn" id="mFind"><svg viewBox="0 0 24 24"><path d="M10 2a8 8 0 1 0 4.9 14.3l5.4 5.4 1.4-1.4-5.4-5.4A8 8 0 0 0 10 2Zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12Z"/></svg> Find covers</button>
         </div>
         <div class="subrow">
-          <label class="mini">Season <input id="mSeason" type="number" min="1" value="1" /></label>
-          <label class="mini">Episode <input id="mEpisode" type="number" min="1" placeholder="—" /></label>
-          <span class="subhint">Videos with the same show title group into one show. Leave episode blank for a standalone title or movie.</span>
+          <label class="mini">Season <input id="mSeason" type="number" min="1" placeholder="Auto" /></label>
+          <span class="subhint">Everything you selected is added as one show in a single step. Episode numbers are read from the filenames; adjust any below. Set Season to apply one season to all.</span>
         </div>
       </div>
       <div class="cover-section">
-        <div class="cover-label">Choose a cover</div>
+        <div class="cover-label">Choose one cover for the show</div>
         <div class="covers" id="mCovers"></div>
         <div id="mSearchState"></div>
-        <p class="hint">Frames from the video come first, then online matches (with genres pulled in automatically), then your own uploads. The picked cover is saved on this device.</p>
+      </div>
+      <div class="field" id="mEpisodesField" style="margin-top:20px">
+        <label>Episodes <span class="ep-count" id="mEpCount"></span></label>
+        <div class="ep-list" id="mEpList"></div>
       </div>
     </div>
     <div class="modal-foot">
