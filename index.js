@@ -1,36 +1,50 @@
 /* Reel — Offline Library. Plain classic scripts, load order: core.js, player.js, index.js. Globals are shared across files. */
 
-/* ============ add flow / modal ============ */
+/* ============ add flow / modal (batch by show) ============ */
 let queue=[], current=null, selectedCover=null, selectedMeta=null;
 const overlay=$('#overlay');
 $('#fileInput').addEventListener('change',e=>{
   const files=[...e.target.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|webm|ogv|mov|mkv|m4v)$/i.test(f.name));
   e.target.value='';
   if(!files.length){toast('No video files selected.',true);return;}
-  queue=files; nextInQueue();
+  queue=groupFiles(files); nextGroup();
 });
-async function nextInQueue(){
-  if(!queue.length){closeModal();return;}
-  const file=queue.shift();
-  const ep=parseEpisode(file.name);
-  current={id:uid(),file,title:cleanTitle(file.name),season:ep.season,episode:ep.episode,duration:0,still:null};
-  selectedCover=null; selectedMeta=null;
-  await openModalFor(current,queue.length);
+function groupFiles(files){
+  const map=new Map();
+  files.forEach(f=>{
+    const base=cleanTitle(f.name), ep=parseEpisode(f.name), key=normShow(base);
+    if(!map.has(key)) map.set(key,{key,name:base,files:[]});
+    map.get(key).files.push({file:f,season:ep.season,episode:ep.episode,fname:f.name});
+  });
+  const groups=[...map.values()];
+  groups.forEach(g=>g.files.sort((a,b)=>
+    ((a.season||1)-(b.season||1)) ||
+    (((a.episode==null?1e9:a.episode))-((b.episode==null?1e9:b.episode))) ||
+    a.fname.localeCompare(b.fname)));
+  return groups;
 }
-async function openModalFor(item,remaining){
-  $('#mName').value=item.title;
+async function nextGroup(){
+  if(!queue.length){closeModal();return;}
+  current=queue.shift(); current.still=null;
+  selectedCover=null; selectedMeta=null;
+  await openGroupModal(current, queue.length);
+}
+async function openGroupModal(group,remaining){
+  const multi=group.files.length>1;
+  $('#mTitle').textContent = multi?'Add show':'Add title';
+  $('#mName').value=group.name;
   $('#mType').value='Show';
-  $('#mSeason').value=item.season||1;
-  $('#mEpisode').value=item.episode!=null?item.episode:'';
-  $('#mQueue').textContent=remaining>0?(remaining+' more queued'):'';
+  $('#mSeason').value='';
+  $('#mQueue').textContent=remaining>0?(remaining+' more show'+(remaining>1?'s':'')+' queued'):'';
+  $('#mSave').textContent = multi?('Add '+group.files.length+' episodes'):'Save to library';
   $('#mSearchState').innerHTML='';
   const covers=$('#mCovers'); covers.innerHTML=''; addUploadTile(covers);
+  renderEpList(group);
   overlay.classList.add('open'); $('#mName').focus();
 
-  const {frames,duration}=await captureFrames(item.file,6);
-  item.duration=duration;
+  const {frames}=await captureFrames(group.files[0].file,6);
   if(frames.length){
-    item.still=frames[Math.floor(frames.length/2)]||frames[0];
+    group.still=frames[Math.floor(frames.length/2)]||frames[0];
     frames.forEach((f,i)=>{
       const tile=coverTile(f,'data',f,null);
       covers.insertBefore(tile,covers.querySelector('.upload'));
@@ -38,12 +52,11 @@ async function openModalFor(item,remaining){
     });
   }else{
     const n=document.createElement('p'); n.className='hint';
-    n.textContent='Could not read frames from this file (the browser may not decode this format). Try Find covers or upload your own.';
+    n.textContent='Could not read frames from these files (the browser may not decode this format). Try Find covers or upload your own.';
     $('#mSearchState').appendChild(n);
   }
 
-  // If this show already exists, reuse its cover and metadata so episodes match
-  const ex=existingShowMeta(item.title);
+  const ex=existingShowMeta(group.name);
   if(ex && ex.cover){
     const meta={type:ex.type,genres:ex.genres,synopsis:ex.synopsis,year:ex.year,score:ex.score};
     const tile=coverTile(ex.cover, ex.coverType==='url'?'url':'data', ex.cover, meta);
@@ -51,11 +64,22 @@ async function openModalFor(item,remaining){
     selectCover(tile,{kind:ex.coverType==='url'?'url':'data',value:ex.cover},meta);
     $('#mType').value=ex.type||'Show';
     const note=document.createElement('p'); note.className='hint';
-    note.textContent='Reusing the cover and genres from “'+ex.name+'” already in your library.';
+    note.textContent='Reusing the cover and genres from \u201c'+ex.name+'\u201d already in your library.';
     $('#mSearchState').appendChild(note);
   }else{
-    runOnlineSearch(item.title,true);
+    runOnlineSearch(group.name,true);
   }
+}
+function renderEpList(group){
+  const multi=group.files.length>1;
+  $('#mEpCount').textContent='('+group.files.length+')';
+  const list=$('#mEpList'); list.innerHTML='';
+  group.files.forEach((it,i)=>{
+    const def = it.episode!=null ? it.episode : (multi?(i+1):'');
+    const row=document.createElement('div'); row.className='ep-list-row';
+    row.innerHTML='<input class="ep-num" type="number" min="1" value="'+def+'" '+(multi?'':'placeholder="\u2014"')+' aria-label="Episode number"><span class="ep-file" title="'+escapeAttr(it.fname)+'">'+escapeHtml(it.fname)+'</span>';
+    list.appendChild(row);
+  });
 }
 function addUploadTile(c){
   const t=document.createElement('div'); t.className='cover-opt upload';
@@ -80,12 +104,12 @@ function selectCover(tile,cover,meta){
   tile.classList.add('sel'); selectedCover=cover; selectedMeta=meta;
   if(meta&&meta.type) $('#mType').value=meta.type;
 }
-$('#mName').addEventListener('input',e=>{if(current)current.title=e.target.value;});
+$('#mName').addEventListener('input',e=>{if(current)current.name=e.target.value;});
 $('#mFind').addEventListener('click',()=>runOnlineSearch($('#mName').value,false));
 async function runOnlineSearch(title,quiet){
   if(!title||!title.trim()){if(!quiet)toast('Type a title first.',true);return;}
   const state=$('#mSearchState');
-  state.innerHTML='<div class="searching"><span class="spinner"></span> Looking for “'+escapeHtml(title.trim())+'” covers…</div>';
+  state.innerHTML='<div class="searching"><span class="spinner"></span> Looking for \u201c'+escapeHtml(title.trim())+'\u201d covers\u2026</div>';
   try{
     const results=await searchOnline(title);
     state.innerHTML='';
@@ -96,13 +120,14 @@ async function runOnlineSearch(title,quiet){
     state.innerHTML='<p class="hint">Could not reach the cover database (you may be offline, or it is rate-limited). Frames and uploads still work.</p>';
   }
 }
-$('#mSave').addEventListener('click',saveCurrent);
-async function saveCurrent(){
+$('#mSave').addEventListener('click',saveGroup);
+async function saveGroup(){
   if(!current)return;
   const show=($('#mName').value||'Untitled').trim();
-  let season=parseInt($('#mSeason').value,10); if(!season||season<1)season=1;
-  const epRaw=($('#mEpisode').value||'').trim();
-  let episode = epRaw===''?null:parseInt(epRaw,10); if(episode!=null&&(isNaN(episode)||episode<1))episode=null;
+  const sOverride=parseInt($('#mSeason').value,10);
+  const seasonOverride=(!sOverride||sOverride<1)?null:sOverride;
+  const rows=[...$('#mEpList').querySelectorAll('.ep-num')];
+  const multi=current.files.length>1;
 
   let coverType='none',cover='';
   if(selectedCover){
@@ -110,28 +135,35 @@ async function saveCurrent(){
     else{try{cover=await urlToDataURL(selectedCover.value);coverType='data';}catch(e){cover=selectedCover.value;coverType='url';}}
   }
   let m=selectedMeta||{};
-  if(!m.genres||!m.genres.length){
-    const ex=existingShowMeta(show);
-    if(ex){ m={type:ex.type,genres:ex.genres,synopsis:ex.synopsis,year:ex.year,score:ex.score}; if(!$('#mType').value)$('#mType').value=ex.type; }
-  }
+  if(!m.genres||!m.genres.length){const ex=existingShowMeta(show); if(ex){m={type:ex.type,genres:ex.genres,synopsis:ex.synopsis,year:ex.year,score:ex.score};}}
+  const type=$('#mType').value||m.type||'Show';
 
   $('#mSave').disabled=true;
-  try{await idbPut(current.id,current.file);}
-  catch(e){$('#mSave').disabled=false;toast('Could not save the video file. It may be too large for this device.',true);return;}
-  library.unshift({
-    id:current.id, title:show, show, season, episode,
-    type:$('#mType').value||m.type||'Show',
-    coverType, cover, still:current.still||null,
-    genres:m.genres||[], synopsis:m.synopsis||'', year:m.year||null, score:m.score||null,
-    duration:current.duration||0, size:current.file.size, mime:current.file.type,
-    addedAt:Date.now(), progress:0, lastWatched:0
-  });
+  let saved=0;
+  for(let i=0;i<current.files.length;i++){
+    const it=current.files[i];
+    const raw=((rows[i]&&rows[i].value)||'').trim();
+    let episode = raw==='' ? (multi?(i+1):null) : parseInt(raw,10);
+    if(episode!=null&&(isNaN(episode)||episode<1)) episode=null;
+    const season = seasonOverride!=null ? seasonOverride : (it.season||1);
+    const id=uid();
+    try{ await idbPut(id,it.file); }
+    catch(e){ toast('Could not save \u201c'+it.fname+'\u201d. It may be too large.',true); continue; }
+    library.unshift({
+      id, title:show, show, season, episode, type,
+      coverType, cover, still:current.still||null,
+      genres:m.genres||[], synopsis:m.synopsis||'', year:m.year||null, score:m.score||null,
+      duration:0, size:it.file.size, mime:it.file.type,
+      addedAt:Date.now()+i, progress:0, lastWatched:0
+    });
+    saved++;
+  }
   saveLibrary(); rebuild();
-  const lbl = episode!=null?(' '+(season>1?('S'+season+' '):'')+'E'+episode):'';
-  $('#mSave').disabled=false; toast('Added “'+show+lbl+'”');
-  current=null; nextInQueue();
+  $('#mSave').disabled=false;
+  toast(multi? ('Added '+saved+' episodes to \u201c'+show+'\u201d') : ('Added \u201c'+show+'\u201d'));
+  current=null; nextGroup();
 }
-$('#mSkip').addEventListener('click',()=>{current=null;nextInQueue();});
+$('#mSkip').addEventListener('click',()=>{current=null;nextGroup();});
 $('#mClose').addEventListener('click',()=>{queue=[];current=null;closeModal();});
 overlay.addEventListener('click',e=>{if(e.target===overlay){queue=[];current=null;closeModal();}});
 function closeModal(){overlay.classList.remove('open');}
