@@ -30,6 +30,11 @@ async function playEpisode(ep){
   if(currentUrl)URL.revokeObjectURL(currentUrl);
   currentUrl=URL.createObjectURL(blob);
   pVideo.src=currentUrl;
+  pVideo.onloadedmetadata=()=>{
+    if(currentPlaying && pVideo.duration && isFinite(pVideo.duration) && currentPlaying.duration!==pVideo.duration){
+      currentPlaying.duration=pVideo.duration; saveLibrary(); updateEpisodeHighlight();
+    }
+  };
   const label=epLabelFor(currentShow,ep);
   $('#pTitle').textContent=currentShow.name+(label?('   ·   '+label):'');
   pVideo.currentTime=(ep.progress&&ep.progress<((ep.duration||1)-5))?ep.progress:0;
