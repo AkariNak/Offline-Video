@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reel — Offline Library</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="mark">
+    <div class="glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm6 4.5v7l6-3.5-6-3.5Z"/></svg></div>
+    <div class="brand">Reel</div>
+  </div>
+  <nav>
+    <button id="navCollections" class="on">Collections</button>
+    <button id="navStats">Stats</button>
+  </nav>
+  <div class="spacer"></div>
+  <div class="search">
+    <svg viewBox="0 0 24 24"><path d="M10 2a8 8 0 1 0 4.9 14.3l5.4 5.4 1.4-1.4-5.4-5.4A8 8 0 0 0 10 2Zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12Z"/></svg>
+    <input id="filter" type="text" placeholder="Search library" aria-label="Search library" />
+  </div>
+  <button class="btn primary" id="addBtn">
+    <svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg>
+    Add videos
+  </button>
+</div>
+
+<!-- HERO -->
+<section class="hero" id="hero" style="display:none"></section>
+
+<!-- FILTERS -->
+<div class="filters" id="filters" style="display:none">
+  <div class="type-tabs" id="typeTabs"></div>
+  <div class="genre-chips" id="genreChips"></div>
+</div>
+
+<!-- HOME ROWS -->
+<div class="rows" id="rows"></div>
+
+<!-- GRID VIEW -->
+<div class="grid-view" id="gridView" style="display:none">
+  <div class="grid-head">
+    <button class="btn sm ghost" id="gridBack">
+      <svg viewBox="0 0 24 24"><path d="M15 6 9 12l6 6 1.4-1.4L11.8 12l4.6-4.6L15 6Z"/></svg> Back
+    </button>
+    <h2 id="gridTitle"></h2>
+    <span class="cnt" id="gridCount"></span>
+  </div>
+  <div class="grid" id="grid"></div>
+</div>
+
+<!-- STATS -->
+<div class="stats" id="statsView" style="display:none"></div>
+
+<!-- EMPTY -->
+<div class="empty" id="empty" style="display:none">
+  <div class="ring"><svg viewBox="0 0 24 24"><path d="M12 3a1 1 0 0 1 1 1v6h6a1 1 0 1 1 0 2h-6v6a1 1 0 1 1-2 0v-6H5a1 1 0 1 1 0-2h6V4a1 1 0 0 1 1-1Z"/></svg></div>
+  <h3>Your library is empty</h3>
+  <p>Add video files from this computer. They play offline with no internet, and stay saved between visits. Name each one and pick a cover from the video's own frames, pull the real poster from the web, or use your own image.</p>
+  <button class="btn primary" id="addBtn2"><svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z"/></svg> Add your first video</button>
+</div>
+
+<!-- COVER MODAL -->
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="step" id="mStep">Adding to library</div>
+        <h2 id="mTitle">Title and cover</h2>
+      </div>
+      <button class="icon-btn close" id="mClose" aria-label="Cancel"><svg viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12 19 17.6 17.6 19 12 13.4 6.4 19 5 17.6 10.6 12 5 6.4 6.4 5Z"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label for="mName">Title</label>
+        <div class="row">
+          <input id="mName" type="text" placeholder="e.g. Call of the Night" autocomplete="off" />
+          <select id="mType" aria-label="Type">
+            <option value="Show">Show</option>
+            <option value="Movie">Movie</option>
+            <option value="OVA">OVA</option>
+          </select>
+          <button class="btn" id="mFind"><svg viewBox="0 0 24 24"><path d="M10 2a8 8 0 1 0 4.9 14.3l5.4 5.4 1.4-1.4-5.4-5.4A8 8 0 0 0 10 2Zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12Z"/></svg> Find covers</button>
+        </div>
+      </div>
+      <div class="cover-section">
+        <div class="cover-label">Choose a cover</div>
+        <div class="covers" id="mCovers"></div>
+        <div id="mSearchState"></div>
+        <p class="hint">Frames from the video come first, then online matches (with genres pulled in automatically), then your own uploads. The picked cover is saved on this device.</p>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="q" id="mQueue"></span>
+      <div class="actions">
+        <button class="btn ghost" id="mSkip">Skip</button>
+        <button class="btn primary" id="mSave">Save to library</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PLAYER -->
+<div class="player" id="player">
+  <div class="player-top">
+    <h2 id="pTitle"></h2>
+    <div class="actions">
+      <button class="btn danger ghost" id="pDelete"><svg viewBox="0 0 24 24"><path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm-2 6h10l-1 11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1L7 9Z"/></svg> Delete</button>
+      <button class="btn" id="pClose">Close</button>
+    </div>
+  </div>
+  <video id="pVideo" controls playsinline></video>
+</div>
+
+<div class="toast" id="toast"></div>
+<input type="file" id="fileInput" accept="video/*" multiple hidden />
+<input type="file" id="coverUpload" accept="image/*" hidden />
+<div class="hidden-stage" id="stage" aria-hidden="true"></div>
+
+<script src="core.js"></script>
+<script src="player.js"></script>
+<script src="index.js"></script>
+</body>
+</html>
