@@ -1,7 +1,7 @@
 /* Reel — Offline Library. Plain classic scripts, load order: core.js, player.js, index.js. Globals are shared across files. */
 
 /* ============ add flow / modal (batch by show) ============ */
-let queue=[], current=null, selectedCover=null, selectedMeta=null;
+let queue=[], current=null, selectedCover=null, selectedMeta=null, captureToken=0;
 const overlay=$('#overlay');
 $('#fileInput').addEventListener('change',e=>{
   const files=[...e.target.files].filter(f=>f.type.startsWith('video/')||/\.(mp4|webm|ogv|mov|mkv|m4v)$/i.test(f.name));
@@ -31,6 +31,7 @@ async function nextGroup(){
 }
 async function openGroupModal(group,remaining){
   const multi=group.files.length>1;
+  const myToken=++captureToken;
   $('#mTitle').textContent = multi?'Add show':'Add title';
   $('#mName').value=group.name;
   $('#mType').value='Show';
@@ -42,7 +43,7 @@ async function openGroupModal(group,remaining){
   renderEpList(group);
   overlay.classList.add('open'); $('#mName').focus();
 
-  const {frames}=await captureFrames(group.files[0].file,6);
+  const {frames}=await captureFrames(group.files[0].file, multi?6:12);
   if(frames.length){
     group.still=frames[Math.floor(frames.length/2)]||frames[0];
     frames.forEach((f,i)=>{
@@ -69,6 +70,29 @@ async function openGroupModal(group,remaining){
   }else{
     runOnlineSearch(group.name,true);
   }
+  captureMoreCovers(group,myToken);
+}
+async function captureMoreCovers(group,token){
+  if(!group||group.files.length<=1) return;
+  const covers=$('#mCovers');
+  const maxExtra=10, perEp=3, capTiles=42;
+  const step=Math.max(1,Math.round((group.files.length-1)/maxExtra));
+  const idxs=[];
+  for(let k=1;k<group.files.length && idxs.length<maxExtra;k+=step) idxs.push(k);
+  const hint=document.createElement('p'); hint.className='hint'; hint.id='mMoreHint';
+  hint.textContent='Adding more cover options from other episodes\u2026';
+  $('#mSearchState').appendChild(hint);
+  for(const k of idxs){
+    if(token!==captureToken) return;
+    let res; try{ res=await captureFrames(group.files[k].file,perEp); }catch(e){ continue; }
+    if(token!==captureToken) return;
+    (res.frames||[]).forEach(f=>{
+      if(covers.querySelectorAll('.cover-opt:not(.upload)').length>=capTiles) return;
+      const tile=coverTile(f,'data',f,null);
+      covers.insertBefore(tile,covers.querySelector('.upload'));
+    });
+  }
+  const h=$('#mMoreHint'); if(h) h.remove();
 }
 function renderEpList(group){
   const multi=group.files.length>1;
@@ -166,7 +190,7 @@ async function saveGroup(){
 $('#mSkip').addEventListener('click',()=>{current=null;nextGroup();});
 $('#mClose').addEventListener('click',()=>{queue=[];current=null;closeModal();});
 overlay.addEventListener('click',e=>{if(e.target===overlay){queue=[];current=null;closeModal();}});
-function closeModal(){overlay.classList.remove('open');}
+function closeModal(){captureToken++;overlay.classList.remove('open');}
 
 /* ============ view state ============ */
 let filterType='All', filterGenre=null, view='home'; // home | grid | stats
