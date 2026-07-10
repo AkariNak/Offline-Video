@@ -117,6 +117,29 @@
         <label>Episodes <span class="ep-count" id="mEpCount"></span></label>
         <div class="ep-list" id="mEpList"></div>
       </div>
+      <div class="compress-box">
+        <label class="switch">
+          <input type="checkbox" id="mCompress" />
+          <span>Compress videos before saving (optional)</span>
+        </label>
+        <div class="compress-opts" id="mCompressOpts" hidden>
+          <label class="mini">Quality
+            <select id="mQuality">
+              <option value="28">Smaller file</option>
+              <option value="24" selected>Balanced</option>
+              <option value="21">Higher quality</option>
+            </select>
+          </label>
+          <label class="mini">Max resolution
+            <select id="mMaxRes">
+              <option value="0">Keep original</option>
+              <option value="720">720p</option>
+              <option value="480">480p</option>
+            </select>
+          </label>
+        </div>
+        <p class="warn" id="mCompressWarn" style="display:none">Heads up: this re-encodes each video right here in your browser. It uses a lot of CPU, can take several minutes per video, downloads a one-time encoder over wifi the first time, and often fails on phones or with very large files. If a video can't be compressed, the original is saved instead so nothing is lost. For big libraries, compressing with a desktop tool like HandBrake before adding is faster and higher quality.</p>
+      </div>
       <p class="hint disclosure">Kura copies each video into this device's storage, so you can delete the originals after adding. Videos are saved on this device only. They are not uploaded or backed up, and clearing this browser's data would remove them.</p>
     </div>
     <div class="modal-foot">
