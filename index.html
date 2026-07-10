@@ -38,6 +38,7 @@
 <!-- FILTERS -->
 <div class="filters" id="filters" style="display:none">
   <div class="type-tabs" id="typeTabs"></div>
+  <div class="type-tabs lang-tabs" id="langTabs"></div>
   <div class="genre-chips" id="genreChips"></div>
 </div>
 
@@ -97,6 +98,13 @@
         </div>
         <div class="subrow">
           <label class="mini">Season <input id="mSeason" type="number" min="1" placeholder="Auto" /></label>
+          <label class="mini">Language
+            <select id="mLang">
+              <option value="Sub">Sub</option>
+              <option value="Dub">Dub</option>
+              <option value="Both">Both</option>
+            </select>
+          </label>
           <span class="subhint">Everything you selected is added as one show in a single step. Episode numbers are read from the filenames; adjust any below. Set Season to apply one season to all.</span>
         </div>
       </div>
@@ -146,6 +154,14 @@
 <div class="toast" id="toast"></div>
 <input type="file" id="fileInput" accept="video/*" multiple hidden />
 <input type="file" id="coverUpload" accept="image/*" hidden />
+<input type="file" id="importInput" accept=".kura,application/octet-stream" hidden />
+<div class="progress-overlay" id="progressOverlay">
+  <div class="progress-card">
+    <div class="progress-title" id="progTitle">Working…</div>
+    <div class="progress-track"><i id="progBar"></i></div>
+    <div class="progress-status" id="progStatus"></div>
+  </div>
+</div>
 <div class="hidden-stage" id="stage" aria-hidden="true"></div>
 
 <script src="core.js"></script>
