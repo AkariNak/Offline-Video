@@ -67,11 +67,18 @@ async function captureFrames(file,count){
 async function searchOnline(title){
   const q=encodeURIComponent((title||'').trim());
   if(!q) return [];
-  const res=await fetch(`https://api.jikan.moe/v4/anime?q=${q}&limit=8&sfw`);
-  if(!res.ok) throw new Error('http '+res.status);
-  const data=await res.json();
+  const url=`https://api.jikan.moe/v4/anime?q=${q}&limit=8&sfw=true`;
+  let data=null;
+  for(let attempt=0; attempt<3; attempt++){
+    try{
+      const res=await fetch(url,{headers:{'Accept':'application/json'}});
+      if(res.status===429){ await new Promise(r=>setTimeout(r,1300)); continue; }
+      if(!res.ok) throw new Error('http '+res.status);
+      data=await res.json(); break;
+    }catch(e){ if(attempt===2) throw e; await new Promise(r=>setTimeout(r,700)); }
+  }
   const seen=new Set(), out=[];
-  for(const it of (data.data||[])){
+  for(const it of ((data&&data.data)||[])){
     const img=it.images&&it.images.jpg&&(it.images.jpg.large_image_url||it.images.jpg.image_url);
     if(!img||seen.has(img))continue; seen.add(img);
     let type='Show';
@@ -80,6 +87,12 @@ async function searchOnline(title){
     out.push({img, type, genres:(it.genres||[]).map(g=>g.name).slice(0,4), synopsis:it.synopsis||'', year:it.year||(it.aired&&it.aired.prop&&it.aired.prop.from&&it.aired.prop.from.year)||null, score:it.score||null});
   }
   return out;
+}
+function proxify(u){ if(!u) return u; return 'https://images.weserv.nl/?url=ssl:'+u.replace(/^https?:\/\//,'')+'&w=460&output=jpg'; }
+async function coverToDataURL(url){
+  try{ return await urlToDataURL(url); }catch(e){}
+  try{ return await urlToDataURL(proxify(url)); }catch(e){}
+  return null;
 }
 function urlToDataURL(url){return new Promise((res,rej)=>{const img=new Image();img.crossOrigin='anonymous';img.onload=()=>{try{const maxW=460,scale=Math.min(1,maxW/img.naturalWidth),c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*scale);c.height=Math.round(img.naturalHeight*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);res(c.toDataURL('image/jpeg',0.85));}catch(e){rej(e);}};img.onerror=()=>rej(new Error('load'));img.src=url;});}
 
@@ -94,6 +107,13 @@ function parseEpisode(raw){
   return {season:1,episode:null};
 }
 function normShow(s){return (s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();}
+function parseLang(raw){
+  const n=(raw||'').replace(/[._]+/g,' ');
+  if(/\b(dual[\s-]?audio|multi[\s-]?audio)\b/i.test(n)) return 'Both';
+  if(/\b(dub|dubbed|eng(?:lish)?[\s-]?dub)\b/i.test(n)) return 'Dub';
+  if(/\b(sub|subbed|subtitled)\b/i.test(n)) return 'Sub';
+  return null;
+}
 function isCompleted(v){const d=v.duration||0;if(d<=0)return false;return (v.progress||0)>=d-600||(v.progress||0)>=d*0.9;}
 
 function groupShows(items){
@@ -124,6 +144,8 @@ function groupShows(items){
     s.addedAt=Math.max.apply(null,s.episodes.map(e=>e.addedAt||0));
     s.count=s.episodes.length;
     s.multiSeason=new Set(s.episodes.map(e=>e.season||1)).size>1;
+    const langs=new Set(s.episodes.map(e=>e.lang||'Both'));
+    s.lang = (langs.has('Both')||(langs.has('Sub')&&langs.has('Dub'))) ? 'Both' : ([...langs][0]||'Both');
     const inProg=s.episodes.filter(e=>(e.progress||0)>20 && !isCompleted(e));
     inProg.sort((a,b)=>(b.lastWatched||0)-(a.lastWatched||0));
     s.resume=inProg[0]||null;
@@ -142,6 +164,61 @@ function migrate(){
     if(v.season===undefined){v.season=1; changed=true;}
     if(v.episode===undefined){v.episode=null; changed=true;}
     if(v.lastWatched===undefined){v.lastWatched=0; changed=true;}
+    if(v.lang===undefined){v.lang='Both'; changed=true;}
   });
   if(changed) saveLibrary();
+}
+
+/* ============ export / import library ============ */
+function downloadBlob(blob,name){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),8000);
+}
+// Container: "KURA" + 12-digit header length + header JSON + concatenated video blobs.
+async function exportLibrary(onProgress){
+  const validItems=[], parts=[], blobsMeta=[];
+  for(let i=0;i<library.length;i++){
+    const it=library[i];
+    let blob=null; try{ blob=await idbGet(it.id); }catch(e){}
+    if(!blob) continue;
+    validItems.push(it); parts.push(blob); blobsMeta.push({id:it.id,size:blob.size});
+    if(onProgress) onProgress(i+1, library.length, 'Packing');
+  }
+  if(!validItems.length) throw new Error('No saved videos to export');
+  const header=JSON.stringify({v:1, exportedAt:Date.now(), library:validItems, blobs:blobsMeta});
+  const headerBytes=new TextEncoder().encode(header);
+  const prefix='KURA'+String(headerBytes.length).padStart(12,'0');
+  return new Blob([prefix, headerBytes, ...parts], {type:'application/octet-stream'});
+}
+function isDupRecord(rec){
+  return library.some(v=>
+    (v.size||0)===(rec.size||0) &&
+    (v.episode==null?null:v.episode)===(rec.episode==null?null:rec.episode) &&
+    (v.season||1)===(rec.season||1) &&
+    normShow(v.show||v.title)===normShow(rec.show||rec.title));
+}
+async function importLibrary(file,onProgress){
+  const head=await file.slice(0,16).text();
+  if(!head.startsWith('KURA')) throw new Error('Not a Kura library file');
+  const hlen=parseInt(head.slice(4,16),10);
+  if(!hlen||isNaN(hlen)) throw new Error('Corrupt file header');
+  const meta=JSON.parse(await file.slice(16,16+hlen).text());
+  const items=meta.library||[], blobs=meta.blobs||[];
+  const byId={}; items.forEach(it=>byId[it.id]=it);
+  let offset=16+hlen, added=0;
+  for(let i=0;i<blobs.length;i++){
+    const b=blobs[i], src=byId[b.id];
+    const start=offset; offset+=b.size;
+    if(!src || isDupRecord(src)) { if(onProgress)onProgress(i+1,blobs.length,'Importing'); continue; }
+    const blob=file.slice(start, offset);
+    const newId=uid();
+    try{ await idbPut(newId, blob); }catch(e){ continue; }
+    library.unshift(Object.assign({}, src, {id:newId}));
+    added++;
+    if(onProgress) onProgress(i+1, blobs.length, 'Importing');
+  }
+  migrate(); saveLibrary();
+  return added;
 }
