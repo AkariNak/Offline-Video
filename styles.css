@@ -194,6 +194,12 @@
   .ep-list-row .ep-num{width:60px;flex:none;background:var(--panel-2);border:1px solid var(--line);color:var(--ink);font-family:var(--mono);font-size:13px;padding:7px 8px;border-radius:8px;outline:none;text-align:center}
   .ep-list-row .ep-num:focus{border-color:var(--accent)}
   .ep-list-row .ep-file{min-width:0;font-size:12px;color:var(--ink-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .compress-box{margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
+  .switch{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;font-weight:500;color:var(--ink)}
+  .switch input{width:16px;height:16px;accent-color:var(--accent);cursor:pointer}
+  .compress-opts{display:flex;gap:14px;flex-wrap:wrap;margin:14px 0 4px}
+  .compress-opts .mini select{background:var(--panel);border:1px solid var(--line);color:var(--ink);font-family:var(--body);font-size:14px;padding:8px 10px;border-radius:9px;outline:none;cursor:pointer}
+  .warn{margin-top:12px;font-size:12.5px;line-height:1.55;color:#e2b23a;background:rgba(226,178,58,.08);border:1px solid rgba(226,178,58,.28);border-radius:10px;padding:11px 13px}
   .cover-label{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:600;color:var(--ink-dim);margin:18px 0 12px}
   .cover-label::after{content:"";flex:1;height:1px;background:var(--line)}
   .covers{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:12px}
