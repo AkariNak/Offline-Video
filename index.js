@@ -36,6 +36,7 @@ async function openGroupModal(group,remaining){
   $('#mName').value=group.name;
   $('#mType').value='Show';
   $('#mSeason').value='';
+  $('#mLang').value = parseLang(group.files[0].fname)||'Sub';
   $('#mQueue').textContent=remaining>0?(remaining+' more show'+(remaining>1?'s':'')+' queued'):'';
   $('#mSave').textContent = multi?('Add '+group.files.length+' episodes'):'Save to library';
   $('#mSearchState').innerHTML='';
@@ -119,7 +120,11 @@ $('#coverUpload').addEventListener('change',e=>{
 });
 function coverTile(src,kind,value,meta){
   const t=document.createElement('div'); t.className='cover-opt';
-  t.innerHTML='<img alt="Cover option" src="'+src+'"><span class="check"><svg viewBox="0 0 24 24"><path d="M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7 9.5 16.2Z"/></svg></span>';
+  const img=document.createElement('img'); img.alt='Cover option'; img.loading='lazy'; img.src=src;
+  if(kind==='url'){ img.onerror=()=>{ img.onerror=null; img.src=proxify(value); }; }
+  const chk=document.createElement('span'); chk.className='check';
+  chk.innerHTML='<svg viewBox="0 0 24 24"><path d="M9.5 16.2 5.3 12l-1.4 1.4 5.6 5.6L20.1 8.4 18.7 7 9.5 16.2Z"/></svg>';
+  t.appendChild(img); t.appendChild(chk);
   t.addEventListener('click',()=>selectCover(t,{kind,value},meta));
   return t;
 }
@@ -153,10 +158,11 @@ async function saveGroup(){
   const rows=[...$('#mEpList').querySelectorAll('.ep-num')];
   const multi=current.files.length>1;
 
+  const lang=$('#mLang').value||'Sub';
   let coverType='none',cover='';
   if(selectedCover){
     if(selectedCover.kind==='data'){coverType='data';cover=selectedCover.value;}
-    else{try{cover=await urlToDataURL(selectedCover.value);coverType='data';}catch(e){cover=selectedCover.value;coverType='url';}}
+    else{const d=await coverToDataURL(selectedCover.value); if(d){cover=d;coverType='data';} else {cover=selectedCover.value;coverType='url';}}
   }
   let m=selectedMeta||{};
   if(!m.genres||!m.genres.length){const ex=existingShowMeta(show); if(ex){m={type:ex.type,genres:ex.genres,synopsis:ex.synopsis,year:ex.year,score:ex.score};}}
@@ -174,7 +180,7 @@ async function saveGroup(){
     try{ await idbPut(id,it.file); }
     catch(e){ toast('Could not save \u201c'+it.fname+'\u201d. It may be too large.',true); continue; }
     library.unshift({
-      id, title:show, show, season, episode, type,
+      id, title:show, show, season, episode, type, lang,
       coverType, cover, still:current.still||null,
       genres:m.genres||[], synopsis:m.synopsis||'', year:m.year||null, score:m.score||null,
       duration:0, size:it.file.size, mime:it.file.type,
@@ -193,7 +199,7 @@ overlay.addEventListener('click',e=>{if(e.target===overlay){queue=[];current=nul
 function closeModal(){captureToken++;overlay.classList.remove('open');}
 
 /* ============ view state ============ */
-let filterType='All', filterGenre=null, view='home'; // home | grid | stats
+let filterType='All', filterLang='All', filterGenre=null, view='home'; // home | grid | stats
 let heroItems=[], heroIndex=0, heroTimer=null;
 let SHOWS=[];
 
@@ -215,8 +221,14 @@ function rebuild(){
 }
 
 function matchesType(s){return filterType==='All'||s.type===filterType;}
+function matchesLang(s){
+  if(filterLang==='All')return true;
+  if(filterLang==='Sub')return s.lang==='Sub'||s.lang==='Both';
+  if(filterLang==='Dub')return s.lang==='Dub'||s.lang==='Both';
+  return s.lang==='Both';
+}
 function searchTerm(){return ($('#filter').value||'').toLowerCase();}
-function baseShows(){const t=searchTerm();return SHOWS.filter(s=>matchesType(s)&&(!t||s.name.toLowerCase().includes(t)));}
+function baseShows(){const t=searchTerm();return SHOWS.filter(s=>matchesType(s)&&matchesLang(s)&&(!t||s.name.toLowerCase().includes(t)));}
 function epLabelFor(show,ep){ if(!ep||ep.episode==null)return ''; return (show.multiSeason?('S'+ep.season+' '):'')+'E'+ep.episode; }
 
 /* ---- hero ---- */
@@ -237,6 +249,7 @@ function drawHero(){
   const desc=s.synopsis?escapeHtml(s.synopsis):(s.count>1?(s.count+' episodes saved on this device'):('Saved on this device · '+fmtSize(s.size)));
   const tags=[];
   if(s.type)tags.push(s.type);
+  if(s.lang)tags.push(s.lang==='Both'?'Sub/Dub':s.lang);
   if(s.count>1)tags.push(s.count+' episodes');
   if(s.year)tags.push(s.year);
   if(s.score)tags.push('★ '+s.score);
@@ -275,8 +288,12 @@ function renderFilters(){
   $('#typeTabs').innerHTML=types.map(t=>'<button class="'+(filterType===t?'on':'')+'" data-t="'+t+'">'+labelMap[t]+'</button>').join('');
   document.querySelectorAll('#typeTabs button').forEach(b=>b.onclick=()=>{filterType=b.dataset.t;heroIndex=0;rebuild();});
 
+  const langs=['All','Sub','Dub','Both'];
+  $('#langTabs').innerHTML=langs.map(l=>'<button class="'+(filterLang===l?'on':'')+'" data-l="'+l+'">'+l+'</button>').join('');
+  document.querySelectorAll('#langTabs button').forEach(b=>b.onclick=()=>{filterLang=b.dataset.l;heroIndex=0;rebuild();});
+
   const gcount={};
-  SHOWS.filter(matchesType).forEach(s=>(s.genres||[]).forEach(g=>gcount[g]=(gcount[g]||0)+1));
+  SHOWS.filter(s=>matchesType(s)&&matchesLang(s)).forEach(s=>(s.genres||[]).forEach(g=>gcount[g]=(gcount[g]||0)+1));
   const genres=Object.keys(gcount).sort((a,b)=>gcount[b]-gcount[a]);
   let chips='<button class="'+(!filterGenre?'on':'')+'" data-g="__all">All</button>';
   chips+=genres.map(g=>'<button class="'+(filterGenre===g?'on':'')+'" data-g="'+escapeAttr(g)+'">'+escapeHtml(g)+'</button>').join('');
@@ -343,7 +360,9 @@ function makeCard(s,landscape){
   const resume=s.resume||s.episodes[0];
   const img=landscape?(resume.still||s.still||s.cover):(s.cover||s.still);
   const inner=img?'<img alt="'+escapeAttr(s.name)+'" loading="lazy" src="'+img+'">':'<div class="ph">'+(s.name[0]||'?').toUpperCase()+'</div>';
-  const label=(s.genres&&s.genres[0])?s.genres[0]:s.type;
+  const baseLabel=(s.genres&&s.genres[0])?s.genres[0]:s.type;
+  const langTag=s.lang==='Both'?'Sub/Dub':s.lang;
+  const label=baseLabel+(langTag?(' · '+langTag):'');
   let pct=0, sub;
   if(landscape){
     pct=resume.duration?Math.min(100,((resume.progress||0)/resume.duration)*100):0;
@@ -406,7 +425,15 @@ function renderStats(){
   }else{
     html+='<p class="hint">Genres appear once you pick online covers, which bring their tags along.</p>';
   }
+  html+='<h3>Backup</h3>'+
+    '<p class="hint" style="margin:0 0 14px">Download your whole library, videos included, as one file to move to another device or share with someone. Importing merges a file into your current library and skips anything you already have.</p>'+
+    '<div class="backup-btns">'+
+      '<button class="btn" id="btnExport"><svg viewBox="0 0 24 24"><path d="M11 3h2v8h3l-4 4-4-4h3V3Zm-6 15h14v2H5z"/></svg> Export library</button>'+
+      '<button class="btn" id="btnImport"><svg viewBox="0 0 24 24"><path d="M13 15h-2V7H8l4-4 4 4h-3v8ZM5 18h14v2H5z"/></svg> Import library</button>'+
+    '</div>';
   $('#statsView').innerHTML=html;
+  const be=$('#btnExport'); if(be) be.onclick=doExport;
+  const bi=$('#btnImport'); if(bi) bi.onclick=()=>$('#importInput').click();
 }
 function stat(num,lbl){return '<div class="stat"><div class="num">'+escapeHtml(String(num))+'</div><div class="lbl">'+lbl+'</div></div>';}
 
@@ -422,6 +449,30 @@ document.addEventListener('keydown',e=>{
     if($('#player').classList.contains('open'))closePlayer();
     else if(overlay.classList.contains('open')){queue=[];current=null;closeModal();}
   }
+});
+
+/* ---- backup progress + export/import ---- */
+function showProgress(title){ $('#progTitle').textContent=title||'Working\u2026'; $('#progStatus').textContent=''; $('#progBar').style.width='0%'; $('#progressOverlay').classList.add('open'); }
+function setProgress(done,total,label){ const p=total?Math.round(done/total*100):0; $('#progBar').style.width=p+'%'; $('#progStatus').textContent=(label||'')+' '+done+' / '+total; }
+function hideProgress(){ $('#progressOverlay').classList.remove('open'); }
+async function doExport(){
+  if(!library.length){toast('Nothing to export yet.',true);return;}
+  showProgress('Preparing export');
+  try{
+    const blob=await exportLibrary((d,t,l)=>setProgress(d,t,l));
+    hideProgress();
+    downloadBlob(blob, 'kura-library-'+new Date().toISOString().slice(0,10)+'.kura');
+    toast('Library exported.');
+  }catch(e){ hideProgress(); toast('Export failed: '+e.message,true); }
+}
+$('#importInput').addEventListener('change', async e=>{
+  const file=e.target.files[0]; e.target.value=''; if(!file)return;
+  showProgress('Reading library file');
+  try{
+    const n=await importLibrary(file,(d,t,l)=>setProgress(d,t,l));
+    hideProgress(); rebuild();
+    toast(n? ('Imported '+n+(n===1?' video.':' videos.')) : 'Nothing new to import.');
+  }catch(err){ hideProgress(); toast('Import failed: '+err.message,true); }
 });
 
 rebuild();
