@@ -222,3 +222,43 @@ async function importLibrary(file,onProgress){
   migrate(); saveLibrary();
   return added;
 }
+
+/* ============ optional in-browser compression (ffmpeg.wasm) ============ */
+/* Experimental. Loads a ~25MB encoder from a CDN on first use (needs wifi once),
+   re-encodes in the browser (heavy CPU, may fail on phones or very large files).
+   Callers must fall back to the original file if this throws. */
+function loadScriptOnce(src){
+  return new Promise((res,rej)=>{
+    const s=document.createElement('script'); s.src=src; s.async=true;
+    s.onload=res; s.onerror=()=>rej(new Error('Could not load the encoder (need wifi?)'));
+    document.head.appendChild(s);
+  });
+}
+let _ffmpeg=null, _ffLoading=null;
+async function getFFmpeg(){
+  if(_ffmpeg) return _ffmpeg;
+  if(_ffLoading) return _ffLoading;
+  _ffLoading=(async()=>{
+    if(!window.FFmpeg) await loadScriptOnce('https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js');
+    const { createFFmpeg } = window.FFmpeg;
+    const ff=createFFmpeg({ log:false, corePath:'https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.js' });
+    await ff.load();
+    _ffmpeg=ff; return ff;
+  })();
+  return _ffLoading;
+}
+async function compressVideo(file,opts,onRatio){
+  const ff=await getFFmpeg();
+  const { fetchFile } = window.FFmpeg;
+  const inName='in.dat', outName='out.mp4';
+  if(onRatio) ff.setProgress(({ratio})=>onRatio(Math.max(0,Math.min(1,ratio||0))));
+  ff.FS('writeFile', inName, await fetchFile(file));
+  const args=['-i',inName,'-c:v','libx264','-preset','veryfast','-crf',String(opts.crf||24)];
+  if(opts.maxRes>0) args.push('-vf','scale=-2:min(ih\\,'+opts.maxRes+')');
+  args.push('-c:a','aac','-b:a','128k','-movflags','+faststart',outName);
+  await ff.run.apply(ff,args);
+  const data=ff.FS('readFile',outName);
+  try{ ff.FS('unlink',inName); }catch(e){}
+  try{ ff.FS('unlink',outName); }catch(e){}
+  return new Blob([data.buffer],{type:'video/mp4'});
+}
