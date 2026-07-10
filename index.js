@@ -37,6 +37,8 @@ async function openGroupModal(group,remaining){
   $('#mType').value='Show';
   $('#mSeason').value='';
   $('#mLang').value = parseLang(group.files[0].fname)||'Sub';
+  $('#mCompressOpts').hidden = !$('#mCompress').checked;
+  $('#mCompressWarn').style.display = $('#mCompress').checked ? 'block' : 'none';
   $('#mQueue').textContent=remaining>0?(remaining+' more show'+(remaining>1?'s':'')+' queued'):'';
   $('#mSave').textContent = multi?('Add '+group.files.length+' episodes'):'Save to library';
   $('#mSearchState').innerHTML='';
@@ -153,6 +155,9 @@ $('#mSave').addEventListener('click',saveGroup);
 async function saveGroup(){
   if(!current)return;
   const show=($('#mName').value||'Untitled').trim();
+  const compress = !!($('#mCompress') && $('#mCompress').checked);
+  const crf = parseInt(($('#mQuality')||{}).value,10)||24;
+  const maxRes = parseInt(($('#mMaxRes')||{}).value,10)||0;
   const sOverride=parseInt($('#mSeason').value,10);
   const seasonOverride=(!sOverride||sOverride<1)?null:sOverride;
   const rows=[...$('#mEpList').querySelectorAll('.ep-num')];
@@ -169,25 +174,35 @@ async function saveGroup(){
   const type=$('#mType').value||m.type||'Show';
 
   $('#mSave').disabled=true;
+  if(compress) showProgress('Compressing videos');
   let saved=0;
-  for(let i=0;i<current.files.length;i++){
+  const total=current.files.length;
+  for(let i=0;i<total;i++){
     const it=current.files[i];
     const raw=((rows[i]&&rows[i].value)||'').trim();
     let episode = raw==='' ? (multi?(i+1):null) : parseInt(raw,10);
     if(episode!=null&&(isNaN(episode)||episode<1)) episode=null;
     const season = seasonOverride!=null ? seasonOverride : (it.season||1);
+    let store=it.file, mime=it.file.type;
+    if(compress){
+      try{
+        const out=await compressVideo(it.file,{crf,maxRes},r=>setProgress(i+r,total,'Compressing '+(i+1)+' / '+total));
+        if(out && out.size>0 && out.size<it.file.size){ store=out; mime='video/mp4'; }
+      }catch(err){ /* fall back to the original file */ }
+    }
     const id=uid();
-    try{ await idbPut(id,it.file); }
+    try{ await idbPut(id,store); }
     catch(e){ toast('Could not save \u201c'+it.fname+'\u201d. It may be too large.',true); continue; }
     library.unshift({
       id, title:show, show, season, episode, type, lang,
       coverType, cover, still:current.still||null,
       genres:m.genres||[], synopsis:m.synopsis||'', year:m.year||null, score:m.score||null,
-      duration:0, size:it.file.size, mime:it.file.type,
+      duration:0, size:store.size, mime,
       addedAt:Date.now()+i, progress:0, lastWatched:0
     });
     saved++;
   }
+  if(compress) hideProgress();
   saveLibrary(); rebuild();
   $('#mSave').disabled=false;
   toast(multi? ('Added '+saved+' episodes to \u201c'+show+'\u201d') : ('Added \u201c'+show+'\u201d'));
@@ -465,6 +480,10 @@ async function doExport(){
     toast('Library exported.');
   }catch(e){ hideProgress(); toast('Export failed: '+e.message,true); }
 }
+$('#mCompress').addEventListener('change',()=>{
+  $('#mCompressOpts').hidden = !$('#mCompress').checked;
+  $('#mCompressWarn').style.display = $('#mCompress').checked ? 'block' : 'none';
+});
 $('#importInput').addEventListener('change', async e=>{
   const file=e.target.files[0]; e.target.value=''; if(!file)return;
   showProgress('Reading library file');
